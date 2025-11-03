@@ -9,6 +9,18 @@ import pandas as pd
 
 
 def _validate_fineco_config(config: dict) -> dict:
+    """
+    Validate and extract Fineco configuration from the main config dictionary.
+
+    Args:
+        config: Main configuration dictionary containing 'fineco' section.
+
+    Returns:
+        Validated Fineco configuration dictionary.
+
+    Raises:
+        ValueError: If 'fineco' section is missing or required keys are absent/invalid.
+    """
     try:
         fineco_config = config["fineco"]
     except KeyError as exc:
@@ -39,13 +51,35 @@ def prepare_fineco_csv(input_path: Path, output_path: Path, config: dict) -> int
     """
     Convert Fineco Excel file to Firefly III CSV format.
 
+    This function reads a Fineco Excel file, processes the transaction data,
+    and outputs a CSV file compatible with Firefly III import format.
+
     Args:
-        input_path: Path to input Excel file
-        output_path: Path to output CSV file
-        config: Configuration dictionary with Fineco settings
+        input_path: Path to the input Excel file (.xlsx format)
+        output_path: Path where the output CSV file will be written
+        config: Configuration dictionary containing Fineco-specific settings
 
     Returns:
-        Number of rows dropped because of missing date or amount values.
+        Number of rows dropped due to missing date or amount values.
+
+    Raises:
+        ValueError: If required configuration keys are missing or invalid,
+                   or if required columns are not present in the Excel file.
+
+    Example:
+        >>> from pathlib import Path
+        >>> config = {
+        ...     "fineco": {
+        ...         "default_account": "Fineco Account",
+        ...         "header_row": 0,
+        ...         "required_columns": ["Data_Valuta", "Descrizione", "Entrate", "Uscite"],
+        ...         "currency_code": "EUR",
+        ...         "card_a": "Carta A",
+        ...         "card_b": "Carta B"
+        ...     }
+        ... }
+        >>> dropped = prepare_fineco_csv(Path("input.xlsx"), Path("output.csv"), config)
+        >>> print(f"Conversion complete, {dropped} rows dropped")
     """
     fineco_config = _validate_fineco_config(config)
 
@@ -64,28 +98,36 @@ def prepare_fineco_csv(input_path: Path, output_path: Path, config: dict) -> int
 
         df = xls.parse(sheet_name, header=fineco_config["header_row"])
 
+    # Validate that all required columns are present in the DataFrame
     required = fineco_config["required_columns"]
     if not set(required).issubset(df.columns):
         missing_columns = [c for c in required if c not in df.columns]
         raise ValueError(f"Colonne richieste mancanti: {missing_columns}")
 
+    # Calculate transaction amounts: positive for deposits (entrate), negative for withdrawals (uscite)
     entrate = pd.to_numeric(df.get("Entrate"), errors="coerce")
     uscite = pd.to_numeric(df.get("Uscite"), errors="coerce")
     amt = entrate.fillna(0) - uscite.fillna(0)
 
+    # Extract and process date information
     date = pd.to_datetime(df["Data_Valuta"], errors="coerce").dt.date
+
+    # Handle description fields with fallbacks
     descr_base = df["Descrizione"].fillna(df["Descrizione_Completa"]).fillna("Transazione")
     descr_full = df["Descrizione_Completa"].fillna(df["Descrizione"]).fillna("Transazione")
 
+    # Identify card-specific transactions
     dstr = df["Descrizione"].astype(str).str.strip()
     mask_a = dstr == fineco_config["card_a"]
     mask_b = dstr == fineco_config["card_b"]
 
+    # Determine account names based on card type
     row_account = np.where(
         mask_a,
         fineco_config["card_a"],
         np.where(mask_b, fineco_config["card_b"], default_account),
     )
+    # Use full description for card transactions, base description otherwise
     description = np.where(mask_a | mask_b, descr_full, descr_base)
     payee = descr_full
 

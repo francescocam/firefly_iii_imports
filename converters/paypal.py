@@ -8,12 +8,28 @@ from typing import Dict, List
 
 
 def _parse_decimal_it(value: str) -> Decimal:
-    """Parse Italian-formatted decimal string to Decimal.
+    """
+    Parse Italian-formatted decimal string to Decimal.
+
+    Handles Italian number formatting where comma is the decimal separator
+    and period is the thousands separator.
+
+    Args:
+        value: String representation of a decimal number in Italian format.
+
+    Returns:
+        Decimal representation of the input value. Returns Decimal("0") for
+        empty strings, None values, or invalid inputs.
 
     Examples:
-    - "-33,67" -> Decimal("-33.67")
-    - "1.234,56" -> Decimal("1234.56")
-    - "" or None -> Decimal("0")
+        >>> _parse_decimal_it("-33,67")
+        Decimal('-33.67')
+        >>> _parse_decimal_it("1.234,56")
+        Decimal('1234.56')
+        >>> _parse_decimal_it("")
+        Decimal('0')
+        >>> _parse_decimal_it(None)
+        Decimal('0')
     """
     if value is None:
         return Decimal("0")
@@ -35,7 +51,38 @@ def convert_paypal_csv_to_firefly(
     output_csv: Path | str,
     config: dict,
 ) -> List[Dict[str, str]]:
-    """Convert PayPal CSV to Firefly III import format."""
+    """
+    Convert PayPal CSV to Firefly III import format.
+
+    Processes PayPal CSV files with paired transaction rows (header + accounting line).
+    Handles currency conversion transactions and identifies unpaired rows.
+
+    Args:
+        input_csv: Path to the input PayPal CSV file.
+        output_csv: Path where the output Firefly III CSV will be written.
+        config: Configuration dictionary containing PayPal-specific settings.
+
+    Returns:
+        List of dictionaries containing information about unpaired/orphan rows
+        that were skipped during processing. Each dict has 'row_number' and 'name' keys.
+
+    Raises:
+        ValueError: If required PayPal configuration keys are missing or invalid.
+
+    Example:
+        >>> config = {
+        ...     "paypal": {
+        ...         "source_account": "PayPal",
+        ...         "output_columns": ["date", "description", "amount", "currency_code", "type", "source_account", "destination_account"],
+        ...         "default_input": "paypal.csv",
+        ...         "default_output": "paypal_firefly.csv",
+        ...         "positive_is_withdrawal": True
+        ...     }
+        ... }
+        >>> orphans = convert_paypal_csv_to_firefly("input.csv", "output.csv", config)
+        >>> if orphans:
+        ...     print(f"Found {len(orphans)} orphan rows")
+    """
     try:
         paypal_config = config["paypal"]
     except KeyError as exc:
@@ -79,37 +126,42 @@ def convert_paypal_csv_to_firefly(
         row = rows[i]
         name = (row.get("Nome") or "").strip()
 
-        # If this row is not a transaction head, advance
+        # Skip rows that are not transaction headers (empty "Nome" field)
         if not name:
             i += 1
             continue
 
-        # Expect the immediate next row to be the paired accounting line
+        # PayPal CSV has paired rows: header row followed by accounting row
+        # Check if there's a following row for this transaction
         if i + 1 >= n:
-            orphan_rows.append({"row_number": i + 1, "name": name})
+            orphan_rows.append({"row_number": str(i + 1), "name": name})
             break
         row2 = rows[i + 1]
 
-        # If the next row also has a "Nome", it is another header – record orphan
+        # If the next row also has a "Nome", it means this is another header
+        # without a paired accounting row - mark as orphan
         if (row2.get("Nome") or "").strip():
-            orphan_rows.append({"row_number": i + 1, "name": name})
+            orphan_rows.append({"row_number": str(i + 1), "name": name})
             i += 1
             continue
 
-        # Extract fields from the second row as per spec
+        # Extract transaction details from the accounting row (second row of pair)
         date_str = (row2.get("Data") or "").strip()
         currency = (row2.get("Valuta") or "").strip()
         amount_raw = (row2.get("Importo") or "").strip()
         amount_val = _parse_decimal_it(amount_raw)
 
-        # Business rule from user: positive amount -> withdrawal, else deposit
+        # Determine transaction type based on configuration
+        # positive_is_withdrawal: if True, positive amounts are withdrawals; if False, positive amounts are deposits
         if positive_is_withdrawal:
             tx_type = "withdrawal" if amount_val > 0 else "deposit"
         else:
             tx_type = "deposit" if amount_val > 0 else "withdrawal"
 
+        # Convert amount to negative for Firefly III format (withdrawals positive, deposits negative)
         amount_out = (-amount_val).quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN)
 
+        # Create output row in Firefly III format
         out_rows.append(
             {
                 "date": date_str,
@@ -122,12 +174,11 @@ def convert_paypal_csv_to_firefly(
             }
         )
 
-        # Skip the paired row
+        # Skip the paired accounting row we just processed
         i += 2
 
-        # For 4-row transactions (currency conversion), skip the following
-        # conversion lines which have empty "Nome" and Tipo starts with
-        # "Conversione di valuta generica".
+        # Handle currency conversion transactions which may have additional rows
+        # Skip conversion lines that have empty "Nome" and "Tipo" starting with "Conversione di valuta generica"
         while i < n and not (rows[i].get("Nome") or "").strip():
             tipo = (rows[i].get("Tipo") or "").strip()
             if tipo.startswith("Conversione di valuta generica"):
