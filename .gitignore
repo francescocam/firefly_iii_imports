@@ -1,0 +1,6 @@
+.venv/
+config/
+output/
+*.csv
+*.xlsx
+*.json
