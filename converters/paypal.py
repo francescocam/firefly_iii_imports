@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import csv
 import json
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal, InvalidOperation, ROUND_HALF_EVEN
 from pathlib import Path
 from typing import Dict, List
 
@@ -34,16 +34,33 @@ def convert_paypal_csv_to_firefly(
     input_csv: Path | str,
     output_csv: Path | str,
     config: dict,
-) -> None:
-    """
-    Convert PayPal CSV to Firefly III import format.
+) -> List[Dict[str, str]]:
+    """Convert PayPal CSV to Firefly III import format."""
+    try:
+        paypal_config = config["paypal"]
+    except KeyError as exc:
+        raise ValueError("Missing 'paypal' section in configuration.") from exc
 
-    Args:
-        input_csv: Path to input PayPal CSV file
-        output_csv: Path to output CSV file for Firefly III import
-        config: Configuration dictionary with PayPal settings
-    """
-    paypal_config = config["paypal"]
+    required_keys = [
+        "source_account",
+        "output_columns",
+        "default_input",
+        "default_output",
+    ]
+    missing_keys = [key for key in required_keys if key not in paypal_config]
+    if missing_keys:
+        raise ValueError(
+            "Missing required PayPal configuration keys: " + ", ".join(missing_keys)
+        )
+
+    output_columns = paypal_config["output_columns"]
+    if not isinstance(output_columns, list) or not output_columns:
+        raise ValueError("'paypal.output_columns' must be a non-empty list.")
+
+    positive_is_withdrawal = paypal_config.get("positive_is_withdrawal", True)
+    if not isinstance(positive_is_withdrawal, bool):
+        raise ValueError("'paypal.positive_is_withdrawal' must be a boolean if provided.")
+
     input_csv = Path(input_csv)
     output_csv = Path(output_csv)
     output_csv.parent.mkdir(parents=True, exist_ok=True)
@@ -54,6 +71,7 @@ def convert_paypal_csv_to_firefly(
         rows: List[Dict[str, str]] = list(reader)
 
     out_rows: List[Dict[str, str]] = []
+    orphan_rows: List[Dict[str, str]] = []
 
     i = 0
     n = len(rows)
@@ -68,8 +86,15 @@ def convert_paypal_csv_to_firefly(
 
         # Expect the immediate next row to be the paired accounting line
         if i + 1 >= n:
+            orphan_rows.append({"row_number": i + 1, "name": name})
             break
         row2 = rows[i + 1]
+
+        # If the next row also has a "Nome", it is another header – record orphan
+        if (row2.get("Nome") or "").strip():
+            orphan_rows.append({"row_number": i + 1, "name": name})
+            i += 1
+            continue
 
         # Extract fields from the second row as per spec
         date_str = (row2.get("Data") or "").strip()
@@ -78,13 +103,18 @@ def convert_paypal_csv_to_firefly(
         amount_val = _parse_decimal_it(amount_raw)
 
         # Business rule from user: positive amount -> withdrawal, else deposit
-        tx_type = "withdrawal" if amount_val > 0 else "deposit"
+        if positive_is_withdrawal:
+            tx_type = "withdrawal" if amount_val > 0 else "deposit"
+        else:
+            tx_type = "deposit" if amount_val > 0 else "withdrawal"
+
+        amount_out = (-amount_val).quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN)
 
         out_rows.append(
             {
                 "date": date_str,
                 "description": name,
-                "amount": str(-amount_val),
+                "amount": format(amount_out, "f"),
                 "currency_code": currency,
                 "type": tx_type,
                 "source_account": paypal_config["source_account"],
@@ -108,9 +138,11 @@ def convert_paypal_csv_to_firefly(
 
     # Write output
     with output_csv.open("w", encoding="utf-8", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=paypal_config["output_columns"])
+        writer = csv.DictWriter(f, fieldnames=output_columns)
         writer.writeheader()
         writer.writerows(out_rows)
+
+    return orphan_rows
 
 
 if __name__ == "__main__":
@@ -141,4 +173,12 @@ if __name__ == "__main__":
     input_path = args.input or paypal_config["default_input"]
     output_path = args.output or paypal_config["default_output"]
 
-    convert_paypal_csv_to_firefly(input_path, output_path, config)
+    orphans = convert_paypal_csv_to_firefly(input_path, output_path, config)
+    if orphans:
+        printable = ", ".join(
+            f"row {entry['row_number']}: {entry['name']}" for entry in orphans
+        )
+        print(
+            "Skipped unpaired PayPal rows – review CSV near " + printable,
+            flush=True,
+        )
