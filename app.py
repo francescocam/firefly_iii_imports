@@ -7,6 +7,7 @@ from datetime import datetime
 from pathlib import Path
 from converters.fineco import prepare_fineco_csv
 from converters.paypal import convert_paypal_csv_to_firefly
+from converters.n26 import convert_n26_csv_to_firefly
 
 
 @click.group()
@@ -117,6 +118,44 @@ def paypal(ctx_obj, input_file):
         )
         click.echo(
             "Skipped unpaired PayPal rows – review CSV near " + details,
+            err=True,
+        )
+
+
+@cli.command()
+@click.argument('input_file', type=click.Path(exists=True, dir_okay=False), required=False)
+@click.pass_obj
+def n26(ctx_obj, input_file):
+    """Convert N26 CSV file to Firefly III CSV format."""
+    config = ctx_obj['config']
+    if "n26" not in config:
+        raise click.ClickException("Missing 'n26' section in configuration.")
+    n26_config = config["n26"]
+
+    if input_file is None:
+        # Look for CSV files in input directory
+        input_dir = Path('input')
+        csv_files = list(input_dir.glob('*.csv'))
+        if not csv_files:
+            raise click.ClickException("No CSV files found in input directory. Please specify an input file or place .csv files in the 'input' directory.")
+        if len(csv_files) > 1:
+            raise click.ClickException("Multiple CSV files found in input directory. Please specify which file to convert.")
+        input_file = str(csv_files[0])
+
+    # Generate timestamp for filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_filename = f"n26_to_firefly_{timestamp}.csv"
+    output_path = ctx_obj['output_dir'] / output_filename
+
+    try:
+        dropped = convert_n26_csv_to_firefly(Path(input_file), output_path, config)
+    except ValueError as exc:
+        raise click.ClickException(str(exc))
+
+    click.echo(f"Successfully converted {input_file} to {output_path}")
+    if dropped:
+        click.echo(
+            f"Skipped {dropped} transaction(s) lacking date or amount information.",
             err=True,
         )
 

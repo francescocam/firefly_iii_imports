@@ -128,13 +128,13 @@ def prepare_fineco_csv(input_path: Path, output_path: Path, config: dict) -> int
     destination_account_name = descr_full
 
     output_data = {
-        "date": date,
+        "date_transaction": date,
         "description": description,
         "amount": amt.abs().round(2),
         "currency_code": fineco_config["currency_code"],
         "type": np.where(amt < 0, "withdrawal", "deposit"),
-        "source_name": source_account_name,
-        "destination_name": destination_account_name,
+        "account-name": source_account_name,
+        "opposing-name": destination_account_name,
         "category": pd.NA,
         "notes": df["Descrizione"],
         "tags": pd.NA,
@@ -149,5 +149,3 @@ def prepare_fineco_csv(input_path: Path, output_path: Path, config: dict) -> int
     out.to_csv(output_path, index=False, encoding="utf-8")
 
     return dropped
-
-
