@@ -8,6 +8,7 @@ from pathlib import Path
 from converters.fineco import prepare_fineco_csv
 from converters.paypal import convert_paypal_csv_to_firefly
 from converters.n26 import convert_n26_csv_to_firefly
+from converters.unicredit import convert_unicredit_csv_to_firefly
 
 
 @click.group()
@@ -158,6 +159,40 @@ def n26(ctx_obj, input_file):
             f"Skipped {dropped} transaction(s) lacking date or amount information.",
             err=True,
         )
+
+
+@cli.command()
+@click.argument('input_file', type=click.Path(exists=True, dir_okay=False), required=False)
+@click.pass_obj
+def unicredit(ctx_obj, input_file):
+    """Convert Unicredit CSV file to Firefly III CSV format."""
+    config = ctx_obj['config']
+    if "unicredit" not in config:
+        raise click.ClickException("Missing 'unicredit' section in configuration.")
+    unicredit_config = config["unicredit"]
+
+    if input_file is None:
+        # Look for CSV files in input directory
+        input_dir = Path('input')
+        csv_files = list(input_dir.glob('unicredit*.csv'))
+        if not csv_files:
+            raise click.ClickException("No Unicredit CSV files found in input directory. Please specify an input file or place unicredit*.csv files in the 'input' directory.")
+        if len(csv_files) > 1:
+            raise click.ClickException("Multiple Unicredit CSV files found in input directory. Please specify which file to convert.")
+        input_file = str(csv_files[0])
+
+    # Generate timestamp for filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_filename = f"unicredit_to_firefly_{timestamp}.csv"
+    output_path = ctx_obj['output_dir'] / output_filename
+
+    try:
+        processed = convert_unicredit_csv_to_firefly(Path(input_file), output_path, config)
+    except ValueError as exc:
+        raise click.ClickException(str(exc))
+
+    click.echo(f"Successfully converted {input_file} to {output_path}")
+    click.echo(f"Processed {processed} transactions")
 
 
 if __name__ == "__main__":
