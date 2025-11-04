@@ -27,7 +27,7 @@ def _validate_fineco_config(config: dict) -> dict:
         raise ValueError("Missing 'fineco' section in configuration.") from exc
 
     required_keys = [
-        "default_account",
+        "fineco_account",
         "header_row",
         "required_columns",
         "currency_code",
@@ -70,12 +70,12 @@ def prepare_fineco_csv(input_path: Path, output_path: Path, config: dict) -> int
         >>> from pathlib import Path
         >>> config = {
         ...     "fineco": {
-        ...         "default_account": "Fineco Account",
+        ...         "fineco_account": "Fineco Account",
         ...         "header_row": 0,
         ...         "required_columns": ["Data_Valuta", "Descrizione", "Entrate", "Uscite"],
         ...         "currency_code": "EUR",
-        ...         "card_a": "Carta A",
-        ...         "card_b": "Carta B"
+        ...         "card_a": {"number": "<card number as it appears in the transactions>", "source_account_name": "fineco carta prepagata"},
+        ...         "card_b": {"number": "5127 **** **** 2119", "source_account_name": "fineco carta credito"}
         ...     }
         ... }
         >>> dropped = prepare_fineco_csv(Path("input.xlsx"), Path("output.csv"), config)
@@ -88,13 +88,9 @@ def prepare_fineco_csv(input_path: Path, output_path: Path, config: dict) -> int
     with pd.ExcelFile(input_path, engine="openpyxl") as xls:
         sheet_name = xls.sheet_names[0]
         try:
-            head = xls.parse(sheet_name, nrows=1)
-            if not head.empty:
-                default_account = str(head.iloc[0, 0]).strip()
-            else:
-                default_account = fineco_config["default_account"]
+            fineco_account = fineco_config["fineco_account"]
         except Exception:
-            default_account = fineco_config["default_account"]
+            fineco_account = fineco_config["fineco_account"]
 
         df = xls.parse(sheet_name, header=fineco_config["header_row"])
 
@@ -105,9 +101,9 @@ def prepare_fineco_csv(input_path: Path, output_path: Path, config: dict) -> int
         raise ValueError(f"Colonne richieste mancanti: {missing_columns}")
 
     # Calculate transaction amounts: positive for deposits (entrate), negative for withdrawals (uscite)
-    entrate = pd.to_numeric(df.get("Entrate"), errors="coerce")
-    uscite = pd.to_numeric(df.get("Uscite"), errors="coerce")
-    amt = entrate.fillna(0) - uscite.fillna(0)
+    entrate = pd.to_numeric(df["Entrate"], errors="coerce")
+    uscite = pd.to_numeric(df["Uscite"], errors="coerce")
+    amt = entrate.fillna(0) + uscite.fillna(0)
 
     # Extract and process date information
     date = pd.to_datetime(df["Data_Valuta"], errors="coerce").dt.date
@@ -118,18 +114,18 @@ def prepare_fineco_csv(input_path: Path, output_path: Path, config: dict) -> int
 
     # Identify card-specific transactions
     dstr = df["Descrizione"].astype(str).str.strip()
-    mask_a = dstr == fineco_config["card_a"]
-    mask_b = dstr == fineco_config["card_b"]
+    mask_a = dstr.str.contains(fineco_config["card_a"]["number"])
+    mask_b = dstr.str.contains(fineco_config["card_b"]["number"])
 
     # Determine account names based on card type
-    row_account = np.where(
+    source_account_name = np.where(
         mask_a,
-        fineco_config["card_a"],
-        np.where(mask_b, fineco_config["card_b"], default_account),
+        fineco_config["card_a"]["source_account_name"],
+        np.where(mask_b, fineco_config["card_b"]["source_account_name"], fineco_account),
     )
-    # Use full description for card transactions, base description otherwise
-    description = np.where(mask_a | mask_b, descr_full, descr_base)
-    payee = descr_full
+    # Always use full description
+    description = descr_full
+    destination_account_name = descr_full
 
     output_data = {
         "date": date,
@@ -137,10 +133,10 @@ def prepare_fineco_csv(input_path: Path, output_path: Path, config: dict) -> int
         "amount": amt.abs().round(2),
         "currency_code": fineco_config["currency_code"],
         "type": np.where(amt < 0, "withdrawal", "deposit"),
-        "source_name": np.where(amt < 0, row_account, payee),
-        "destination_name": np.where(amt < 0, payee, row_account),
+        "source_name": source_account_name,
+        "destination_name": destination_account_name,
         "category": pd.NA,
-        "notes": df["Descrizione_Completa"],
+        "notes": df["Descrizione"],
         "tags": pd.NA,
         "external_id": pd.NA,
     }
@@ -155,22 +151,3 @@ def prepare_fineco_csv(input_path: Path, output_path: Path, config: dict) -> int
     return dropped
 
 
-if __name__ == "__main__":
-    # For backward compatibility when run directly
-    import argparse
-
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--input", required=True, help="Percorso file Excel in input")
-    ap.add_argument("--output", required=True, help="Percorso CSV in output")
-    ap.add_argument("--config", default="config/config.json", help="Percorso file configurazione JSON")
-    args = ap.parse_args()
-
-    with open(args.config, 'r', encoding='utf-8') as f:
-        config = json.load(f)
-
-    dropped_rows = prepare_fineco_csv(Path(args.input), Path(args.output), config)
-    if dropped_rows:
-        print(
-            f"Skipped {dropped_rows} transaction(s) lacking date or amount information.",
-            flush=True,
-        )

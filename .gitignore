@@ -1,6 +1,7 @@
 .venv/
 config/
 output/
+__pycache__/
 *.csv
 *.xlsx
 *.json

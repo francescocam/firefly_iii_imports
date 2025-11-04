@@ -3,6 +3,7 @@
 
 import json
 import click
+from datetime import datetime
 from pathlib import Path
 from converters.fineco import prepare_fineco_csv
 from converters.paypal import convert_paypal_csv_to_firefly
@@ -36,16 +37,27 @@ def cli(ctx, config, output_dir):
 
 
 @cli.command()
-@click.argument('input_file', type=click.Path(exists=True, dir_okay=False))
-@click.argument('output_file', type=click.Path())
+@click.argument('input_file', type=click.Path(exists=True, dir_okay=False), required=False)
 @click.pass_obj
-def fineco(ctx_obj, input_file, output_file):
+def fineco(ctx_obj, input_file):
     """Convert Fineco Excel file to Firefly III CSV format."""
     config = ctx_obj['config']
     output_dir = ctx_obj['output_dir']
-    output_path = Path(output_file)
-    if not output_path.is_absolute():
-        output_path = output_dir / output_path
+
+    if input_file is None:
+        # Look for Excel files in input directory
+        input_dir = Path('input')
+        excel_files = list(input_dir.glob('*.xlsx'))
+        if not excel_files:
+            raise click.ClickException("No Excel files found in input directory. Please specify an input file or place .xlsx files in the 'input' directory.")
+        if len(excel_files) > 1:
+            raise click.ClickException("Multiple Excel files found in input directory. Please specify which file to convert.")
+        input_file = str(excel_files[0])
+
+    # Generate timestamp for filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_filename = f"fineco_to_firefly_{timestamp}.csv"
+    output_path = output_dir / output_filename
 
     try:
         dropped = prepare_fineco_csv(Path(input_file), output_path, config)
@@ -62,28 +74,36 @@ def fineco(ctx_obj, input_file, output_file):
 
 @cli.command()
 @click.argument('input_file', type=click.Path(exists=True), required=False)
-@click.argument('output_file', type=click.Path(), required=False)
 @click.pass_obj
-def paypal(ctx_obj, input_file, output_file):
+def paypal(ctx_obj, input_file):
     """Convert PayPal CSV file to Firefly III CSV format."""
     config = ctx_obj['config']
     if "paypal" not in config:
         raise click.ClickException("Missing 'paypal' section in configuration.")
     paypal_config = config["paypal"]
-    try:
-        input_path = input_file or paypal_config["default_input"]
-        output_path = output_file or paypal_config["default_output"]
-    except KeyError as exc:
-        raise click.ClickException(
-            f"Missing required PayPal configuration key: {exc.args[0]}"
-        ) from exc
-    if output_file:
-        output_path = Path(output_file)
-    else:
-        output_path = Path(output_path)
 
-    if not output_path.is_absolute():
-        output_path = ctx_obj['output_dir'] / output_path
+    if input_file is None:
+        # Look for CSV files in input directory
+        input_dir = Path('input')
+        csv_files = list(input_dir.glob('*.csv'))
+        if not csv_files:
+            try:
+                input_path = paypal_config["default_input"]
+            except KeyError as exc:
+                raise click.ClickException(
+                    f"Missing required PayPal configuration key: {exc.args[0]}"
+                ) from exc
+        else:
+            if len(csv_files) > 1:
+                raise click.ClickException("Multiple CSV files found in input directory. Please specify which file to convert.")
+            input_path = str(csv_files[0])
+    else:
+        input_path = input_file
+
+    # Generate timestamp for filename
+    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    output_filename = f"paypal_to_firefly_{timestamp}.csv"
+    output_path = ctx_obj['output_dir'] / output_filename
 
     try:
         orphan_rows = convert_paypal_csv_to_firefly(input_path, output_path, config)
