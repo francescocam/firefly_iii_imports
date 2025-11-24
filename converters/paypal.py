@@ -46,6 +46,113 @@ def _parse_decimal_it(value: str) -> Decimal:
         return Decimal(filtered or "0")
 
 
+def _categorize_transaction(name: str) -> tuple[str, str]:
+    """
+    Categorize transaction based on the payee name.
+
+    Args:
+        name: The name of the payee/description.
+
+    Returns:
+        A tuple containing (category, tags).
+    """
+    category = ""
+    tags = ""
+    
+    # Case-insensitive matching as requested.
+    name_lower = name.lower()
+    
+    if "ebay" in name_lower:
+        category = "ebay"
+    elif "39euroglasses" in name_lower:
+        category = "lenti a contatto"
+    elif "adrial" in name_lower:
+        category = "lenti a contatto"
+    elif "bbb s.p.a." in name_lower:
+        category = "Clothing"
+    elif "bergfreunde" in name_lower:
+        category = "Clothing"
+    elif "capri srl" in name_lower:
+        category = "Clothing"
+    elif "colella group srl" in name_lower:
+        category = "Clothing"
+    elif "converse netherlands bv" in name_lower:
+        category = "Clothing"
+    elif "dagsmejan" in name_lower:
+        category = "Clothing"
+    elif "deporvillage" in name_lower:
+        category = "Clothing"
+    elif "farfetch uk ltd." in name_lower:
+        category = "Clothing"
+    elif "fc-moto" in name_lower:
+        category = "Clothing"
+    elif "h & m hennes & mauritz srl" in name_lower:
+        category = "Clothing"
+    elif "kreuzbergkinder gmbh" in name_lower:
+        category = "Clothing"
+    elif "louis vuitton italia srl" in name_lower:
+        category = "Clothing"
+    elif "maltese lab srl" in name_lower:
+        category = "Clothing"
+    elif "booking.com bv" in name_lower:
+        category = "Travel"
+    elif "deliveroo" in name_lower:
+        category = "Supermarkets and food"
+    elif "euro company srl" in name_lower:
+        category = "Supermarkets and food"
+    elif "eurochef italia spa" in name_lower:
+        category = "Supermarkets and food"
+    elif "madi ventura s.p.a" in name_lower:
+        category = "Supermarkets and food"
+    elif "easypark italia srl" in name_lower:
+        category = "Parking"
+    elif "farmacia" in name_lower:
+        category = "Prodotti farmacia e parafarmacia"
+    elif "farmacie" in name_lower:
+        category = "Prodotti farmacia e parafarmacia"
+    elif "google" in name_lower:
+        category = "Servizi Google"
+    elif "microsoft payments" in name_lower:
+        category = "Servizi Microsoft"
+    elif "moonpay" in name_lower:
+        category = "Crypto"
+    elif "nespresso" in name_lower:
+        category = "Supermarkets and food"
+    elif "netflix" in name_lower:
+        category = "Entertainment"
+    elif "notino" in name_lower:
+        category = "Personal care"
+    elif "parkvia" in name_lower:
+        category = "Parking"
+    elif "sisal" in name_lower:
+        category = "Scommesse"
+    elif "sky italia" in name_lower:
+        category = "Entertainment"
+    elif "spotify" in name_lower:
+        category = "Entertainment"
+    elif "temu" in name_lower:
+        category = "Temu"
+    elif "tikr" in name_lower:
+        category = "Financial Data"
+    elif "tld registrar" in name_lower:
+        category = "Domain Names"
+    elif "namecheap" in name_lower:
+        category = "Domain Names"
+    elif "tradeinn" in name_lower:
+        category = "Clothing"
+    elif "unicorn data services" in name_lower:
+        category = "Financial Data"
+    elif "yoox" in name_lower:
+        category = "Clothing"
+    elif "zalando" in name_lower:
+        category = "Clothing"
+    else:
+        category = ""
+        tags = "to_categorize"
+        
+    return category, tags
+
+
 def convert_paypal_csv_to_firefly(
     input_csv: Path | str,
     output_csv: Path | str,
@@ -93,9 +200,15 @@ def convert_paypal_csv_to_firefly(
             "Missing required PayPal configuration keys: " + ", ".join(missing_keys)
         )
 
-    output_columns = paypal_config["output_columns"]
+    output_columns = list(paypal_config["output_columns"])
     if not isinstance(output_columns, list) or not output_columns:
         raise ValueError("'paypal.output_columns' must be a non-empty list.")
+
+    # Ensure category and tags are in output_columns
+    if "category" not in output_columns:
+        output_columns.append("category")
+    if "tags" not in output_columns:
+        output_columns.append("tags")
 
     positive_is_withdrawal = paypal_config.get("positive_is_withdrawal", True)
     if not isinstance(positive_is_withdrawal, bool):
@@ -148,6 +261,9 @@ def convert_paypal_csv_to_firefly(
         else:
             amount_out = amount_val.quantize(Decimal("0.01"), rounding=ROUND_HALF_EVEN)
 
+        # Categorize transaction
+        category, tags = _categorize_transaction(name)
+
         # Create output row in Firefly III format
         out_rows.append(
             {
@@ -156,6 +272,8 @@ def convert_paypal_csv_to_firefly(
                 "amount": format(amount_out, "f"),
                 "account-name": paypal_config["source_account"],
                 "opposing-name": name,
+                "category": category,
+                "tags": tags,
             }
         )
 

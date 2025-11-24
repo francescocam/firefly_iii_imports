@@ -1,0 +1,52 @@
+import pytest
+from converters.paypal import _categorize_transaction
+
+@pytest.mark.parametrize("name, expected_category, expected_tags", [
+    ("Payment to EBAY", "ebay", ""),
+    ("Purchase from 39EUROGLASSES", "lenti a contatto", ""),
+    ("adrial payment", "lenti a contatto", ""),
+    ("bbb s.p.a. invoice", "Clothing", ""),
+    ("BERGFREUNDE shop", "Clothing", ""),
+    ("Capri Srl store", "Clothing", ""),
+    ("COLELLA GROUP SRL", "Clothing", ""),
+    ("CONVERSE NETHERLANDS BV", "Clothing", ""),
+    ("DAGSMEJAN sleepwear", "Clothing", ""),
+    ("deporvillage sports", "Clothing", ""),
+    ("FARFETCH UK LTD.", "Clothing", ""),
+    ("fc-moto gear", "Clothing", ""),
+    ("h & m hennes & mauritz srl", "Clothing", ""),
+    ("kreuzbergkinder gmbh", "Clothing", ""),
+    ("LOUIS VUITTON ITALIA SRL", "Clothing", ""),
+    ("MALTESE LAB SRL", "Clothing", ""),
+    ("booking.com bv hotel", "Travel", ""),
+    ("DELIVEROO food", "Supermarkets and food", ""),
+    ("EURO COMPANY SRL", "Supermarkets and food", ""),
+    ("EUROCHEF ITALIA SPA", "Supermarkets and food", ""),
+    ("MADI VENTURA S.P.A", "Supermarkets and food", ""),
+    ("EASYPARK ITALIA SRL parking", "Parking", ""),
+    ("FARMACIA centrale", "Prodotti farmacia e parafarmacia", ""),
+    ("FARMACIE comunali", "Prodotti farmacia e parafarmacia", ""),
+    ("GOOGLE Services", "Servizi Google", ""),
+    ("MICROSOFT PAYMENTS", "Servizi Microsoft", ""),
+    ("MOONPAY crypto", "Crypto", ""),
+    ("nespresso coffee", "Supermarkets and food", ""),
+    ("netflix subscription", "Entertainment", ""),
+    ("NOTINO cosmetics", "Personal care", ""),
+    ("PARKVIA parking", "Parking", ""),
+    ("SISAL bet", "Scommesse", ""),
+    ("SKY ITALIA tv", "Entertainment", ""),
+    ("SPOTIFY music", "Entertainment", ""),
+    ("TEMU shop", "Temu", ""),
+    ("tikr terminal", "Financial Data", ""),
+    ("tld registrar domain", "Domain Names", ""),
+    ("NAMECHEAP domain", "Domain Names", ""),
+    ("tradeinn sports", "Clothing", ""),
+    ("UNICORN DATA SERVICES", "Financial Data", ""),
+    ("yoox fashion", "Clothing", ""),
+    ("ZALANDO shoes", "Clothing", ""),
+    ("Unknown Merchant", "", "to_categorize"),
+])
+def test_categorize_transaction(name, expected_category, expected_tags):
+    category, tags = _categorize_transaction(name)
+    assert category == expected_category
+    assert tags == expected_tags
