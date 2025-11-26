@@ -159,31 +159,27 @@ def convert_paypal_csv_to_firefly(
     config: dict,
 ) -> List[Dict[str, str]]:
     """
-    Convert PayPal CSV to Firefly III import format.
+    Convert a PayPal export CSV into a Firefly III compatible CSV file.
 
-    Processes PayPal CSV files with paired or unpaired transaction rows.
-    Handles currency conversion transactions.
+    This function handles the specific structure of PayPal exports, including
+    multi-line transaction representations. It normalizes amounts, applies
+    automatic categorization based on payee names, and maps fields to the
+    configured Firefly III import columns.
 
     Args:
-        input_csv: Path to the input PayPal CSV file.
-        output_csv: Path where the output Firefly III CSV will be written.
-        config: Configuration dictionary containing PayPal-specific settings.
+        input_csv: The file path to the raw PayPal CSV export.
+        output_csv: The target file path for the converted CSV.
+        config: A configuration dictionary containing a 'paypal' section with
+            settings for 'source_account', 'output_columns', and optional
+            'positive_is_withdrawal'.
 
     Returns:
-        Empty list (no orphan rows are identified).
+        A list of dictionaries representing rows that were not successfully
+        converted (currently always returns an empty list).
 
     Raises:
-        ValueError: If required PayPal configuration keys are missing or invalid.
-
-    Example:
-        >>> config = {
-        ...     "paypal": {
-        ...         "source_account": "PayPal",
-        ...         "output_columns": ["date", "description", "amount", "source_account", "destination_account"],
-        ...         "positive_is_withdrawal": True
-        ...     }
-        ... }
-        >>> convert_paypal_csv_to_firefly("input.csv", "output.csv", config)
+        ValueError: If the configuration is missing the 'paypal' section or
+            required keys within it.
     """
     try:
         paypal_config = config["paypal"]
