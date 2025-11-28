@@ -5,6 +5,7 @@ import csv
 from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Dict, List
+import re
 
 
 def _parse_decimal_it(value: str) -> Decimal:
@@ -136,7 +137,7 @@ def convert_unicredit_csv_to_firefly(
     for row in rows:
         # Extract required fields
         data_valuta = (row.get("Data valuta") or "").strip()
-        descrizione = (row.get("Descrizione") or "").strip()
+        descrizione = re.sub(r'\s+', ' ', (row.get("Descrizione") or "")).strip()
         importo_eur = (row.get("Importo (EUR)") or "").strip()
 
         # Skip header or empty rows
@@ -167,36 +168,3 @@ def convert_unicredit_csv_to_firefly(
         writer.writerows(out_rows)
 
     return len(out_rows)
-
-
-if __name__ == "__main__":
-    # For backward compatibility when run directly
-    import argparse
-    import json
-
-    parser = argparse.ArgumentParser(description="Convert Unicredit CSV to Firefly III import format.")
-    parser.add_argument(
-        "input",
-        nargs="?",
-        default=None,
-        help="Input Unicredit CSV path",
-    )
-    parser.add_argument(
-        "output",
-        nargs="?",
-        default=None,
-        help="Output CSV path for Firefly III import",
-    )
-    parser.add_argument("--config", default="config/config.json", help="Path to configuration JSON file")
-
-    args = parser.parse_args()
-
-    with open(args.config, 'r', encoding='utf-8') as f:
-        config = json.load(f)
-
-    unicredit_config = config["unicredit"]
-    input_path = args.input or "input/unicredit_2024_01_01_2025_09_30.csv"
-    output_path = args.output or "output/unicredit_firefly.csv"
-
-    processed = convert_unicredit_csv_to_firefly(input_path, output_path, config)
-    print(f"Processed {processed} transactions")

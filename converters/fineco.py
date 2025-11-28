@@ -109,13 +109,12 @@ def prepare_fineco_csv(input_path: Path, output_path: Path, config: dict) -> int
     date = pd.to_datetime(df["Data_Valuta"], errors="coerce").dt.date
 
     # Handle description fields with fallbacks
-    descr_base = df["Descrizione"].fillna(df["Descrizione_Completa"]).fillna("Transazione")
-    descr_full = df["Descrizione_Completa"].fillna(df["Descrizione"]).fillna("Transazione")
+    descr_full = df["Descrizione_Completa"].fillna("Transazione")
 
     # Identify card-specific transactions
     dstr = df["Descrizione"].astype(str).str.strip()
-    mask_a = dstr.str.contains(fineco_config["card_a"]["number"])
-    mask_b = dstr.str.contains(fineco_config["card_b"]["number"])
+    mask_a = dstr.str.contains(fineco_config["card_a"]["number"], regex=False)
+    mask_b = dstr.str.contains(fineco_config["card_b"]["number"], regex=False)
 
     # Determine account names based on card type
     source_account_name = np.where(
@@ -123,19 +122,49 @@ def prepare_fineco_csv(input_path: Path, output_path: Path, config: dict) -> int
         fineco_config["card_a"]["source_account_name"],
         np.where(mask_b, fineco_config["card_b"]["source_account_name"], fineco_account),
     )
-    # Always use full description
-    description = descr_full
+
     destination_account_name = descr_full
+
+    # Load and apply rules
+    try:
+        rules_path = Path(__file__).resolve().parent.parent / "config" / "fineco_rules.json"
+        with open(rules_path, "r", encoding="utf-8") as f:
+            rules = json.load(f)
+    except Exception as e:
+        print(f"Warning: Could not load rules from {rules_path}: {e}")
+        rules = []
+
+    # Initialize with default values
+    opposing_names = pd.Series("to_input", index=df.index)
+    categories = pd.Series("undefined", index=df.index)
+
+    # Apply rules (reverse order so first rule in list has priority)
+    for rule in reversed(rules):
+        contains_text = rule.get("contains", "")
+        if not contains_text:
+            continue
+            
+        # Case insensitive contains check
+        mask = descr_full.str.contains(contains_text, case=True, regex=False) | \
+               descr_full.str.contains(contains_text, case=False, regex=False)
+        # Note: user said "case insensitive", so case=False should be enough.
+        # But let's stick to standard case=False.
+        mask = descr_full.str.contains(contains_text, case=False, regex=False)
+        
+        if "opposing_name" in rule:
+            opposing_names[mask] = rule["opposing_name"]
+        if "category" in rule:
+            categories[mask] = rule["category"]
 
     output_data = {
         "date_transaction": date,
-        "description": description,
-        "amount": amt.abs().round(2),
+        "description": descr_full,
+        "amount": amt.round(2),
         "currency_code": fineco_config["currency_code"],
         "type": np.where(amt < 0, "withdrawal", "deposit"),
         "account-name": source_account_name,
-        "opposing-name": destination_account_name,
-        "category": pd.NA,
+        "opposing-name": opposing_names,
+        "category": categories,
         "notes": df["Descrizione"],
         "tags": pd.NA,
         "external_id": pd.NA,
@@ -143,7 +172,7 @@ def prepare_fineco_csv(input_path: Path, output_path: Path, config: dict) -> int
 
     out = pd.DataFrame(output_data)
     before_drop = len(out)
-    out = out.dropna(subset=["date", "amount"])
+    out = out.dropna(subset=["date_transaction", "amount"])
     dropped = before_drop - len(out)
 
     out.to_csv(output_path, index=False, encoding="utf-8")

@@ -1,5 +1,6 @@
 .venv/
 config/
+input/
 output/
 __pycache__/
 *.csv

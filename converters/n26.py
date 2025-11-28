@@ -81,7 +81,12 @@ def convert_n26_csv_to_firefly(input_path: Path, output_path: Path, config: dict
     # Handle opposing-name: Partner Name if not empty, otherwise Payment Reference
     partner_name = df["Partner Name"].fillna("")
     payment_ref = df["Payment Reference"].fillna("")
-    opposing_name = partner_name.where(partner_name != "", payment_ref)
+    
+    # If partner name contains "N26", use "N26 fees"
+    is_n26 = partner_name.str.contains("N26", case=False, na=False)
+    opposing_name = partner_name.where(~is_n26, "N26 fees")
+    
+    opposing_name = opposing_name.where(opposing_name != "", payment_ref)
 
     # Amount processing - keep as is (negative for withdrawals, positive for deposits)
     amount = pd.to_numeric(df["Amount (EUR)"], errors="coerce")
@@ -101,7 +106,7 @@ def convert_n26_csv_to_firefly(input_path: Path, output_path: Path, config: dict
     output_data = {
         "date_transaction": date_transaction,
         "opposing-name": opposing_name,
-        "amount": amount.abs().round(2),  # Use absolute value for amount field
+        "amount": amount.round(2),
         "description": description,
         "account-name": n26_config["account_name"],
         # Additional Firefly III fields (can be empty)
